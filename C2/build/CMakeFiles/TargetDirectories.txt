@@ -1,0 +1,3 @@
+/home/tnom/TProjects/C2/build/CMakeFiles/main.dir
+/home/tnom/TProjects/C2/build/CMakeFiles/edit_cache.dir
+/home/tnom/TProjects/C2/build/CMakeFiles/rebuild_cache.dir

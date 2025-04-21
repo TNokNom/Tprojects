@@ -1,0 +1,8 @@
+[
+{
+  "directory": "/home/tnom/TProjects/C2/build",
+  "command": "/sbin/c++ -DUSE_C10D_GLOO -DUSE_DISTRIBUTED -DUSE_RPC -DUSE_TENSORPIPE -isystem /opt/libtorch/include -isystem /opt/libtorch/include/torch/csrc/api/include -D_GLIBCXX_USE_CXX11_ABI=0 -o CMakeFiles/main.dir/src/main.cpp.o -c /home/tnom/TProjects/C2/src/main.cpp",
+  "file": "/home/tnom/TProjects/C2/src/main.cpp",
+  "output": "CMakeFiles/main.dir/src/main.cpp.o"
+}
+]
