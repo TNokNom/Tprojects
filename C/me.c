@@ -1,191 +1,214 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
+#include <unistd.h>
+#include <termios.h>
+#include <ctype.h>
+#include <ncurses.h>
+#include <string.h>
 
-// Map dimensions
-#define MAP_WIDTH 15
-#define MAP_HEIGHT 10
+#define MAP_HEIGHT 20
+#define MAP_WIDTH 80
 
-// Map characters
-#define EMPTY '.'
-#define WALL  '^'
-#define PLAYER 'P'
-#define TREASURE 'T'
+#define PLAYER '@'
+#define TREASURE '%'
+#define EMPTY ' '
 
-void clear_screen() {
-    printf("\033[2J\033[H");  // Clear screen and move cursor to top-left
+const char *logo[] = {
+"   ,----..                                      ",
+"  /   /   \\    ,--,                             ",
+" /   .     : ,--.'|                             ",
+".   /   ;.  \\|  | :            ,--,      ,---,  ",
+".   ;   /  ` ;:  : '          ,'_ /|  ,-+-. /  | ",
+";   |  ; \\ ; ||  ' |     .--. |  | : ,--.'|'   |",
+"|   :  | ; | ''  | |   ,'_ /| :  . ||   |  ,\"' |",
+".   |  ' ' ' :|  | :   |  ' | |  . .|   | /  | |",
+"'   ;  \\; /  |'  : |__ |  | ' |  | ||   | |  | |",
+" \\   \\  ',  / |  | '.'|:  | : ;  ; ||   | |  |/ ",
+"  ;   :    /  ;  :    ;'  :  `--'   \\   | |--'  ",
+"   \\   \\ .'   |  ,   / :  ,      .-./   |/      ",
+"    `---`      ---`-'   `--`----'   '---'       "
+};
+
+const char *menu_items[] = {"START GAME", "info", "exit"};
+#define MENU_SIZE 3
+
+void draw_centered_menu(int highlight, int screen_width, int screen_height) {
+    clear();
+    int logo_height = sizeof(logo) / sizeof(logo[0]);
+    int logo_start_y = 1;
+    for (int i = 0; i < logo_height; i++) {
+        int start_x = (screen_width - strlen(logo[i])) / 2;
+        mvprintw(logo_start_y + i, start_x, "%s", logo[i]);
+    }
+    int menu_start_y = logo_start_y + logo_height + 2;
+    for (int i = 0; i < MENU_SIZE; i++) {
+        int len = strlen(menu_items[i]);
+        int start_x = (screen_width - len - 4) / 2;
+        if (i == highlight)
+            mvprintw(menu_start_y + i, start_x, "> %s <", menu_items[i]);
+        else
+            mvprintw(menu_start_y + i, start_x + 2, "%s", menu_items[i]);
+    }
+    refresh();
 }
 
-// Draw the current game map
-void draw_map(char map[MAP_HEIGHT][MAP_WIDTH]) {
-    for (int i = 0; i < MAP_HEIGHT; i++) {
-        for (int j = 0; j < MAP_WIDTH; j++) {
-            printf("%c", map[i][j]);
+int show_dialogue_choices(const char *question, const char *choices[], int num_choices) {
+    int highlight = 0;
+    int ch;
+    int screen_width, screen_height;
+    getmaxyx(stdscr, screen_height, screen_width);
+
+    while (1) {
+        clear();
+        mvprintw(screen_height / 2 - num_choices / 2 - 2, (screen_width - strlen(question)) / 2, "%s", question);
+        for (int i = 0; i < num_choices; i++) {
+            int len = strlen(choices[i]);
+            int x = (screen_width - len - 4) / 2;
+            if (i == highlight)
+                mvprintw(screen_height / 2 - num_choices / 2 + i, x, "> %s <", choices[i]);
+            else
+                mvprintw(screen_height / 2 - num_choices / 2 + i, x + 2, "%s", choices[i]);
         }
-        printf("\n");
+        refresh();
+
+        ch = getch();
+        if (ch == KEY_UP)
+            highlight = (highlight - 1 + num_choices) % num_choices;
+        else if (ch == KEY_DOWN)
+            highlight = (highlight + 1) % num_choices;
+        else if (ch == 10 || ch == KEY_ENTER)
+            return highlight;
     }
 }
 
-void initialize_map(char map[MAP_HEIGHT][MAP_WIDTH], int *player_x, int *player_y, int *treasure_x, int *treasure_y) {
+char map[MAP_HEIGHT][MAP_WIDTH + 1] = {
+"~~~~~~~~~~~~~~~~~~~~~~~~~ +----------------------+",
+"~~N~~~~/‾‾‾‾‾‾‾‾‾\\~~~~~~~ |        San        |",
+"~W+E‾‾‾           ‾‾‾\\~~~ +----------------------+",
+"~~S\\          %        \\~~ |                   |",
+"~~~~|                 |~~ |   Use your new vessel|",
+"~~~~|       @         |~~ |   to move and pickup |",
+"~~~~|            _____/~~ |   the artifact       |",
+"~~~~\\___        |~~~~~~~~ |                     |",
+"~~~~~~~~\\_______/~~~~~~~~ |                     |",
+"~~~~~~~~~~~~~~~~~~~~~~~~~ |                      |",
+"~~~~~~~~~~~~~~~~~~~~~~~~~ |                      |",
+"~~~~~~~~~~~~~~~~~~~~~~~~~ |                      |",
+"~~~~~~~~~~~~~~~~~~~~~~~~~ |                      |",
+"~~~~~~~~~~~~~~~~~~~~~~~~~ |                      |",
+"~~~~~~~~~~~~~~~~~~~~~~~~~ +----------------------+",
+};
+
+int player_x = -1, player_y = -1;
+
+void draw_map() {
     for (int i = 0; i < MAP_HEIGHT; i++)
-        for (int j = 0; j < MAP_WIDTH; j++)
-            map[i][j] = EMPTY;
-
-    for (int i = 0; i < MAP_WIDTH; i++) {
-        map[2][i] = WALL;
-        map[7][i] = WALL;
-    }
-    for (int i = 0; i < MAP_HEIGHT; i++) {
-        map[i][3] = WALL;
-        map[i][10] = WALL;
-    }
-
-    do {
-        *player_x = rand() % MAP_WIDTH;
-        *player_y = rand() % MAP_HEIGHT;
-    } while (map[*player_y][*player_x] == WALL);
-    map[*player_y][*player_x] = PLAYER;
-
-    do {
-        *treasure_x = rand() % MAP_WIDTH;
-        *treasure_y = rand() % MAP_HEIGHT;
-    } while (map[*treasure_y][*treasure_x] == WALL || (*treasure_x == *player_x && *treasure_y == *player_y));
-    map[*treasure_y][*treasure_x] = TREASURE;
+        printf("%s\n", map[i]);
 }
 
-void load_new_map_section(char map[MAP_HEIGHT][MAP_WIDTH], int *player_x, int *player_y, int *treasure_x, int *treasure_y) {
-    printf("\n Orun awaits you. Find my mask chosen one!! \n");
-
-    for (int i = 0; i < MAP_HEIGHT; i++)
-        for (int j = 0; j < MAP_WIDTH; j++)
-            map[i][j] = EMPTY;
-
-    for (int i = 0; i < MAP_HEIGHT && i < MAP_WIDTH; i++)
-        map[i][i] = WALL;
-
-    *player_x = MAP_WIDTH - 1;
-    *player_y = MAP_HEIGHT - 1;
-    map[*player_y][*player_x] = PLAYER;
-
-    do {
-        *treasure_x = rand() % MAP_WIDTH;
-        *treasure_y = rand() % MAP_HEIGHT;
-    } while (map[*treasure_y][*treasure_x] == WALL || (*treasure_x == *player_x && *treasure_y == *player_y));
-    map[*treasure_y][*treasure_x] = TREASURE;
+void locate_player() {
+    for (int y = 0; y < MAP_HEIGHT; y++)
+        for (int x = 0; x < MAP_WIDTH; x++)
+            if (map[y][x] == PLAYER) {
+                player_x = x;
+                player_y = y;
+                return;
+            }
 }
 
-// Move the player and check for wall collisions
-int move_player(char map[MAP_HEIGHT][MAP_WIDTH], int *player_x, int *player_y, char move) {
-    int new_x = *player_x;
-    int new_y = *player_y;
-
-    if (move == 'w' || move == 'W') new_y--;
-    else if (move == 's' || move == 'S') new_y++;
-    else if (move == 'a' || move == 'A') new_x--;
-    else if (move == 'd' || move == 'D') new_x++;
-    else return 0;
-
-    if (new_x >= 0 && new_x < MAP_WIDTH && new_y >= 0 && new_y < MAP_HEIGHT && map[new_y][new_x] != WALL) {
-        map[*player_y][*player_x] = EMPTY;
-        *player_x = new_x;
-        *player_y = new_y;
-        map[*player_y][*player_x] = PLAYER;
-        return 1;
-    }
-    return 0;
+int is_walkable(int y, int x) {
+    if (x < 0 || x >= MAP_WIDTH || y < 0 || y >= MAP_HEIGHT) return 0;
+    char dest = map[y][x];
+    return dest == EMPTY || dest == TREASURE;
 }
 
-// Olun intro splash screen
-void show_olun_intro() {
-    clear_screen();
-    printf(
-           "░░█░░               ░░░▓░▒▒▒▒▒▒▒▓▒░▒▓▓▓▒▒░▒▒▒▒░▓░░░▓▒▒▒▓▓▓▓▒▒▒▒▒▒▒▒▒▒▒\n"
-        "░░▒░░               ░▒▓▓░▒▒▒▒▒▒▓▒▒▒▓▒▒▓█▓█▒░░█░▒█░░░▓▒▒▒▓▓▓▓▒▒▒▒▒▒▒▒▒▒\n"
-        "▒░▒▒░               ░░▓▓░▒▒▒▒▒▒▓▒▒▒▓▒▒▒▒▒▒▒▓░▒░▒░▓▒░░▒▒▒▒▓▓▓▓▒▒▒▒▒▒▒▒▒\n"
-        "░░░▒░               ░▒▓█▒▒▒▒▒▒▒▒▒▒▒░▒▓▒▒▒░▒▒▒▓░░▓▒▓▒▒▒▒▒▒▒▓▓▓░▒▒▒▒▒▒▒▒\n"
-        "░▒░▒░               ▒▓▓█▒▒▒▒▒▒▒▒▓▒▒▓█▓▒▒▒▒▒▒▒▓▓░▒▒▒▓░▒░▒▒▒▒▒▓▓▒▒▒▒▒▒▒▒\n"
-        "▒▒▒▒░               ░▓▓█░░▒▒▒▒▓▓████▓█▓▒▒░▒▒▒▒▒▓▒░▒▒▓▒▒▒▒▒▒▒▒▓▒▒▒▒▒▒▒▒\n"
-        "▒░▒█▒░              ░▓▓█▒▒▒▒▒▒▒█▓▓█▓▓▓▓▒▒░▒▒▒░▒▒▓░▒▒▓▓▒▒▓▒▒▓▓▓▒▓▒▒▒▒▒▒\n"
-        "░▒█▓▒░              ░▓▓░░▒▒▒▒▒▓█████▒▓█▓▒▒▒▒▒██▒▒▓▒▒▓▒▒▓▓▒▒▒▓▓▓▓▓▒▒▒▒▓\n"
-        "░░░█▒░             ░▒▓█░▒▒▒▒▒▒████░█▓▓██▓██████▓▒▒▓▒▓▓█▓▓▒▒▒▒▒▓▓▓▓▒▒▓▓\n"
-        "░░░░▓▒             ░░▓█░▒▒▒▒▒▒███████▓█▓▓▓▓█████▓▒▒▓▓▒▒▒▒▒▒▒▒▒▒▓▓▒▒▓▓█\n"
-        "▓░▒░░▒░            ░▒▓▒▒▒░▒▒▒▒█████▓█▓█▓▓█▓█████▓▓▒▒▒▒▓▓▓▒▒▓▒▒▒▒▓▓▒▒▓█\n"
-        "░░░▒░▒░            ░▓█░▒▒▒▒▒▒▓██████▓░█▒▓▓▒██████▓▒▓▓███▓▓▓▒▓▒░▓▒▒▒▒▓█\n"
-        "░░░░░░░░          ░▒▓█▒░▒▒▒▒▒█▓▓▓████▓▓▓█▓▓█▓█▓▓█▒▒▓██████▓▓▓▓▓▓▓▓▓▒▓█\n"
-        "░░░░░█▓░          ░▒█▒▒░▒▒▒▒▓█▓░▒▓██▒▓███████▓░█▓▒▒▓███████▓▓▒▒▓▓▒▓▓▓▓\n"
-        "▒▒░░░█▓▒░         ▒▓▒▒▒▒░▒▒▒█▓▒  ▓██▓████████▓██▓▒▒▒▒▓▓▓▓▓▓▓▒▒▒▒▒▒▒▓▒▒\n"
-        "▒▒▒░▒█▓▓░░       ░▒▒▒▒▒▒░▒▒█▓▓▓▓▓▓█▓▓███▓███████▓▒▒▒▒░░░░▒▒▒▒▒▒▓▒▒▒▒▓▒\n"
-        "▒▒░░███▓▒░       ░▓▓░▒▒░▒░▒█▓▒▓▓▓█▓▓███▒▒▒▓█████▒▒▒▒░▒▒▒▒▒▒▓▓▒▒▓▓▒▒▒▒▒\n"
-        "▒░░████▓▓▒░     ░▒▓▓ ▒▒▒▒▒▒█▓▓▓▓██▓███▓   ▒▓█████▓▓▓▓▒▓▒▓▓▓▓▓▒▒▓▓▒▒▒▒▒\n"
-        "░░█████▓▓▓▒░░ ░░░▓▓ ▒▒▒▒░▒▒██▓▓███▓██▓▓▒▒  ▓▓█████▒▓▓▓▓▓▓▓▒▓▓▓▓▓▓▓▓▓▓▒\n"
-        "░░█████▓▓▓▓▒▒▒▒▒▒▓▓▓▒▒░░▒▒▒█████▓▒███▓▓▓▓▓▒█▓█████▒▒▒▒▒▓▒▒▒▒▓▓▓▓▓▓▓█▓▓\n"
-        "░░█████▓██▓▓▓▒▒▓▓▓██▒▓░▒▒▒░█████▒▓███▓▓▓▓▓▓▓██████▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓█\n"
-        "▒░█████████▓▓▓▓▓▓▓██░▒▒▒▒▓▓██████████▓▓▓▒▓▓▓███████▓▒▒▒▒▓▓█████▓██▓▓▓▓\n"
-        "░▒██████████▓▓▓▓███▓▒▒▒▒▒░░▓█████████▓▓▓▓▓▓▓████████▒▓▒▓█████▓▓██▓▒▒▓▓\n"
-        "▒▒█████▓▓█▓▓▓▓▓████▒▒▒▒░░▒░▒████▓████▓▓▓▓▓▓███████████▓█▓█▓▓▓▓▓███▓▒▒▒\n"
-        "░░▒████▓▓█▓▓▓▓█████▒░░░▒▒▒▒▒███▓██████▓▓▓████████████████▓▓▓▓▓▓█▓█▓▓▒▒\n"
-        "░░░████▓▓███▓██████▒▒░░▒▒▒▒▒██▓▒▒░███████████████▓█████▓▓▓▒▓▓▓▓▓▓▓▓▓▒▒\n"
-        "░▒░▓███████████████▒░░░▒▒░░░██████▒▓█████████████▒▓███▓▓▓▒▒▒▒▓▓▓█▓▓▓▓▒\n"
-        "░░░░███████████████▒░░░░▒░░░▓██▒▒▓▓██████████████▒▓██▓▓▓▒▒▒▒▒▒▒▒█▓▓▓▓▒\n"
-        "░░░░███████████████▓▒░▒░▒▒░▒░██▓░▒▒██████████████▒░█▓▓▓▓▒▒▒▒▒▒▒▒██▓▒▒▒\n"
-        "▒░░░███████████████▒░░░░▒░░▒▒███████████████████▒▒░▒█▓▓▒▒▒▒▒▒░░████▒▒▒\n"
-        "░░░▒▒▒▒▒▒▓▓████████▒░░░░░░▒░░▒█▓▓▓█████████████▓░░░▒██▓▒░░▒▒▒▒▒█████▓▒\n"
-        "░░▒▒▓█▓▓▒▒▓▒███████▒░░░░▒░░░░▒█▓▓▓██████████████▒▓░▒▓█▓▒░▒▒▒▒▒▒█████▓▓\n"
-        "░░▒███████░▒▓██▓▓██▒░▒░▒░░▒░░░░█▓████████████████▓▓█▓▓▒▒▒▒▒▒▒▒██████▓▓\n"
-        "\nAre you worthy to see Olun? (y/n): "
-    );
+int move_player(int dx, int dy) {
+    int new_x = player_x + dx;
+    int new_y = player_y + dy;
+
+    if (!is_walkable(new_y, new_x)) return 0;
+
+    char dest = map[new_y][new_x];
+    map[player_y][player_x] = EMPTY;
+    map[new_y][new_x] = PLAYER;
+    player_x = new_x;
+    player_y = new_y;
+    return (dest == TREASURE) ? 2 : 1;
 }
 
 int main() {
-    srand(time(NULL));
+    initscr(); noecho(); cbreak(); curs_set(0); keypad(stdscr, TRUE);
+    int highlight = 0, ch;
+    int screen_width, screen_height;
+    getmaxyx(stdscr, screen_height, screen_width);
 
-    char map[MAP_HEIGHT][MAP_WIDTH];
-    int player_x, player_y, treasure_x, treasure_y;
-    char input[8];
+    while (1) {
+        draw_centered_menu(highlight, screen_width, screen_height);
+        ch = getch();
+        if (ch == KEY_UP)
+            highlight = (highlight - 1 + MENU_SIZE) % MENU_SIZE;
+        else if (ch == KEY_DOWN)
+            highlight = (highlight + 1) % MENU_SIZE;
+        else if (ch == 10 || ch == KEY_ENTER) {
+            if (highlight == 0) break;
+            else if (highlight == 1) {
+                clear(); mvprintw(screen_height/2, (screen_width - 30)/2, "Use arrows to navigate. Press Enter to select."); refresh(); getch();
+            } else {
+                endwin(); return 0;
+            }
+        }
+    }
+    endwin();
 
-    // Splash screen
-    show_olun_intro();
-    fgets(input, sizeof(input), stdin);
-    if (input[0] != 'y' && input[0] != 'Y') {
+    initscr(); noecho(); cbreak(); curs_set(0); keypad(stdscr, TRUE);
+    const char *intro_choices[] = {"Yes, I am worthy", "No, I am not"};
+    int decision = show_dialogue_choices("Are you worthy to see Olun?", intro_choices, 2);
+    if (decision != 0) {
+        endwin();
         printf("\nOlun has denied you.\n");
         return 0;
     }
 
-    // Start the game
-    initialize_map(map, &player_x, &player_y, &treasure_x, &treasure_y);
+    const char *prologue_continue[] = {"Continue"};
+    show_dialogue_choices("Darkness grows. The gods are angry...\nFind my mask and help save Olun.", prologue_continue, 1);
+    endwin();
 
+    locate_player();
     while (1) {
-        clear_screen();
-        draw_map(map);
+        system("clear");
+        draw_map();
+
         printf("\nMove (W/A/S/D): ");
+        struct termios oldt, newt;
+        char input;
+        tcgetattr(STDIN_FILENO, &oldt);
+        newt = oldt;
+        newt.c_lflag &= ~(ICANON | ECHO);
+        tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+        input = getchar();
+        tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+        input = tolower(input);
 
-        if (fgets(input, sizeof(input), stdin) != NULL) {
-            char move = input[0];
-            int moved = move_player(map, &player_x, &player_y, move);
+        int dx = 0, dy = 0;
+        if (input == 'w') dy = -1;
+        else if (input == 's') dy = 1;
+        else if (input == 'a') dx = -1;
+        else if (input == 'd') dx = 1;
+        else continue;
 
-            clear_screen();
-            draw_map(map);
-
-            if (!moved) {
-                printf("\n\033[1;31m❌ Can't move there!\033[0m\n");
-            }
-
-            if (player_x == 0 && player_y == 0) {
-                load_new_map_section(map, &player_x, &player_y, &treasure_x, &treasure_y);
-                continue;
-            }
-
-            if (player_x == treasure_x && player_y == treasure_y) {
-                clear_screen();
-                draw_map(map);
-                printf("\n🎉 You found the treasure! Well done!\n");
-                break;
-            }
-        } else {
-            printf("⚠️ Input error.\n");
-            break;
+        int result = move_player(dx, dy);
+        if (result == 2) {
+            system("clear");
+            draw_map();
+            initscr(); noecho(); cbreak(); curs_set(0); keypad(stdscr, TRUE);
+            const char *mid_scene[] = {"Continue"};
+            show_dialogue_choices("My warrior, Well done!\nYour task doesn't end here, I'm afraid. Continue on, find my mask!", mid_scene, 1);
+            endwin();
+            endwin();
+            // Load new map here
+            printf("Next Chapter Begins..");
+            // You can call a function here to load and run the second map
         }
     }
-
     return 0;
 }
